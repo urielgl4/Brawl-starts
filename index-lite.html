@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Brawl Stars Pick/Ban Assistant — Standalone (Lite)</title>
+  <meta name="description" content="Herramienta ligera para picks y bans en Brawl Stars con presets por modo y sugerencias en tiempo real." />
+  <!-- React + ReactDOM UMD (production builds) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel for in-browser JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: linear-gradient(180deg,#f5f3ff, #eff6ff); }
+    .chip { display:inline-flex; align-items:center; gap:.25rem; border-radius:9999px; padding:.25rem .6rem; font-size:.72rem; border:1px solid rgba(0,0,0,.08); }
+  </style>
+</head>
+<body class="text-gray-900">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useMemo, useState } = React;
+
+    // ===================== DATA =====================
+    const BRAWLER_DB = {
+      "Shelly": { tags: ["short","burst","anti-tank","left","right","flex"] },
+      "Colt": { tags: ["long","poke","mid","right"] },
+      "Brock": { tags: ["long","burst","mid"] },
+      "Spike": { tags: ["mid","control","burst","right"] },
+      "Crow": { tags: ["assassin","poke","mid","flex"] },
+      "Sandy": { tags: ["control","support","mid"] },
+      "Max": { tags: ["support","mid","speed","flex"] },
+      "Gene": { tags: ["support","pull","mid"] },
+      "Piper": { tags: ["long","snipe","mid"] },
+      "Nita": { tags: ["mid","control","left","right"] },
+      "Stu": { tags: ["assassin","mobility","mid","right"] },
+      "Emz": { tags: ["mid","control","left"] },
+      "Gale": { tags: ["control","knockback","mid"] },
+      "Bo": { tags: ["control","vision","mid"] },
+      "Ruffs": { tags: ["support","buff","mid"] },
+      "Amber": { tags: ["mid","area","burn"] },
+      "Belle": { tags: ["long","mark","mid"] },
+      "Bea": { tags: ["long","burst","mid"] },
+      "Tick": { tags: ["thrower","control","mid"] },
+      "Dynamike": { tags: ["thrower","burst","mid"] },
+      "Barley": { tags: ["thrower","area","mid"] },
+      "Frank": { tags: ["tank","stun","left"] },
+      "Bull": { tags: ["tank","short","left","right"] },
+      "Darryl": { tags: ["tank","assassin","roll","left","right"] },
+      "Bibi": { tags: ["tank","knockback","left","right"] },
+      "Pam": { tags: ["support","heal","mid"] },
+      "Poco": { tags: ["support","heal","mid"] },
+      "Sprout": { tags: ["thrower","control","mid"] },
+      "Mico": { tags: ["assassin","mobility","mid","right"] },
+      "Melodie": { tags: ["assassin","burst","mid","right"] },
+      "Pearl": { tags: ["burst","area","mid"] },
+      "Clancy": { tags: ["control","long","mid"] },
+      // --- Pool de Uriel (añadidos) ---
+      "El Primo": { tags: ["tank","short","assassin","left","right"] },
+      "Carl": { tags: ["mid","poke","burst","flex"] },
+      "Mortis": { tags: ["assassin","mobility","anti-thrower","right"] },
+      "Surge": { tags: ["assassin","mobility","mid","scaling","flex"] },
+      "Rico": { tags: ["long","poke","right","mid"] },
+      "Gus": { tags: ["support","shield","mid"] },
+      "Tara": { tags: ["control","pull","mid"] },
+      "Hank": { tags: ["tank","area","burst","mid"] },
+      "Squeak": { tags: ["control","area","mid"] },
+      "Chester": { tags: ["burst","rng","mid"] },
+      "Lily": { tags: ["assassin","mobility","ambush","right","mid"] },
+      "Leon": { tags: ["assassin","invis","mid","right"] },
+      "Fang": { tags: ["assassin","engage","right","left"] }
+    };
+    const ALL_BRAWLERS = Object.keys(BRAWLER_DB).sort();
+
+    const MODES = ["Brawl Ball","Gem Grab","Hot Zone","Heist","Knockout"];
+    const MAPS_BY_MODE = {
+      "Brawl Ball": ["Random"],
+      "Gem Grab": ["Random"],
+      "Hot Zone": ["Random"],
+      "Heist": ["Random"],
+      "Knockout": ["Random"]
+    };
+
+    const MODE_PRESETS = {
+      "Brawl Ball": {
+        picks: ["Fang","Bibi","El Primo","Poco","Gus","Stu","Rico","Leon","Sandy","Carl"],
+        bans: ["Squeak","Tara","Sandy","Crow"]
+      },
+      "Gem Grab": {
+        picks: ["Sandy","Squeak","Belle","Bo","Rico","Amber","Carl","Leon"],
+        bans: ["Tara","Squeak","Sandy","Crow"]
+      },
+      "Hot Zone": {
+        picks: ["Squeak","Sandy","Amber","Bo","Rico","Gus","Stu"],
+        bans: ["Squeak","Sandy","Amber","Tara"]
+      },
+      "Heist": {
+        picks: ["Rico","Amber","Hank","Carl","Bull","El Primo","Fang"],
+        bans: ["Squeak","Tara","Sandy","Crow"]
+      },
+      "Knockout": {
+        picks: ["Piper","Belle","Squeak","Leon","Carl","Sandy","Fang"],
+        bans: ["Piper","Belle","Squeak","Crow","Tara"]
+      }
+    };
+
+    const Chip = ({ children, className = "" }) => (
+      <span className={"chip bg-white/70 " + className}>{children}</span>
+    );
+    const Section = ({ title, children }) => (
+      <div className="space-y-2">
+        <div className="text-sm font-semibold opacity-70">{title}</div>
+        <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-3 shadow-sm border">
+          {children}
+        </div>
+      </div>
+    );
+
+    function App() {
+      const [query, setQuery] = useState("");
+      const [mode, setMode] = useState("Brawl Ball");
+      const [map, setMap] = useState(MAPS_BY_MODE["Brawl Ball"][0]);
+
+      const [owned, setOwned] = useState([
+        "El Primo","Carl","Poco","Mortis","Surge","Bull","Tick","Rico","Gus","Stu","Tara","Hank","Bo","Piper","Bibi","Squeak","Chester","Amber","Lily","Crow","Leon","Sandy","Belle","Fang"
+      ]);
+      const [yourPicks, setYourPicks] = useState([]);
+      const [enemyPicks, setEnemyPicks] = useState([]);
+      const [yourBans, setYourBans] = useState([]);
+      const [enemyBans, setEnemyBans] = useState([]);
+
+      const pool = useMemo(() =>
+        ALL_BRAWLERS.filter(b => b.toLowerCase().includes(query.toLowerCase())),
+      [query]);
+
+      const addUnique = (list, setList, item) => { if (!list.includes(item)) setList([...list, item]); };
+
+      const suggestions = useMemo(() => {
+        const taken = new Set([...yourPicks, ...enemyPicks, ...yourBans, ...enemyBans]);
+        const enemyTagCounts = {};
+        for (const e of enemyPicks) (BRAWLER_DB[e]?.tags || []).forEach(t => enemyTagCounts[t] = (enemyTagCounts[t] || 0) + 1);
+
+        const needRoles = ["control","support","thrower","assassin","tank","long","short"];
+        const haveTags = new Set(yourPicks.flatMap(p => BRAWLER_DB[p]?.tags || []));
+
+        const w = {
+          assassin: (mode === "Brawl Ball" || mode === "Knockout") ? 1.25 : 1.0,
+          control: (mode === "Hot Zone" || mode === "Gem Grab") ? 1.25 : 1.0,
+          dps: (mode === "Heist") ? 1.25 : 1.0
+        };
+
+        const preset = MODE_PRESETS[mode] || { picks: [], bans: [] };
+
+        return ALL_BRAWLERS
+          .filter(b => !taken.has(b))
+          .map(b => {
+            const tags = BRAWLER_DB[b]?.tags || [];
+            let score = 0;
+            if (owned.includes(b)) score += 30;
+            for (const nr of needRoles) if (!haveTags.has(nr) && tags.includes(nr)) score += 6;
+
+            const enemyLong = enemyTagCounts["long"] || 0;
+            const enemyTank = enemyTagCounts["tank"] || 0;
+            if (enemyLong && (tags.includes("assassin") || tags.includes("mobility"))) score += 8 * w.assassin;
+            if (enemyTank && (tags.includes("thrower") || tags.includes("anti-tank") || tags.includes("control"))) score += 8 * w.control;
+
+            if (mode === "Hot Zone" && (tags.includes("control") || tags.includes("area"))) score += 7 * w.control;
+            if (mode === "Brawl Ball" && (tags.includes("assassin") || tags.includes("mobility") || tags.includes("tank"))) score += 7 * w.assassin;
+            if (mode === "Knockout" && (tags.includes("assassin") || tags.includes("long"))) score += 6 * w.assassin;
+            if (mode === "Heist" && (tags.includes("burst") || tags.includes("tank"))) score += 7 * w.dps;
+            if (mode === "Gem Grab" && tags.includes("support")) score += 5 * w.control;
+            if (tags.includes("mid")) score += 2;
+
+            if (preset.picks.includes(b)) score += 6;
+            if (preset.bans.includes(b)) score -= 6;
+
+            return { brawler: b, score, tags,
+              isMetaPick: preset.picks.includes(b),
+              isMetaBan: preset.bans.includes(b)
+            };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 24);
+      }, [yourPicks, enemyPicks, yourBans, enemyBans, owned, mode, map]);
+
+      const [manageOpen, setManageOpen] = useState(false);
+      const [bulkText, setBulkText] = useState("");
+      const bulkApply = () => {
+        const items = bulkText.split(/\\n|,|;/).map(s => s.trim()).filter(Boolean);
+        const normalized = items.map(s =>
+          ALL_BRAWLERS.find(b => b.toLowerCase() === s.toLowerCase()) || s
+        ).filter(b => ALL_BRAWLERS.includes(b));
+        setOwned(Array.from(new Set(normalized)).sort());
+        setManageOpen(false);
+      };
+      const clearDraft = () => { setYourPicks([]); setEnemyPicks([]); setYourBans([]); setEnemyBans([]); };
+
+      return (
+        <div className="min-h-screen w-full p-4 md:p-6">
+          <div className="max-w-6xl mx-auto space-y-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Brawl Stars Pick/Ban Assistant</h1>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setManageOpen(true)} className="rounded-2xl border px-3 py-1.5 text-sm shadow-sm bg-white hover:bg-gray-50">Manage My Brawlers</button>
+                <button onClick={clearDraft} className="rounded-2xl border px-3 py-1.5 text-sm shadow-sm bg-white hover:bg-gray-50">Reset Draft</button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border bg-white/70 p-3">
+              <div className="text-sm font-semibold mb-1">Modo & Presets</div>
+              <div className="grid md:grid-cols-3 gap-2">
+                <div className="flex gap-2">
+                  <select className="rounded-xl border px-3 py-2 flex-1" value={mode} onChange={e => { setMode(e.target.value); setMap(MAPS_BY_MODE[e.target.value][0]); }}>
+                    {MODES.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  <select className="rounded-xl border px-3 py-2 flex-1" value={map} onChange={e => setMap(e.target.value)}>
+                    {(MAPS_BY_MODE[mode] || ["Random"]).map(mp => <option key={mp} value={mp}>{mp}</option>)}
+                  </select>
+                </div>
+                <div className="text-xs md:col-span-2 opacity-70">
+                  Meta picks en <span className="px-1 rounded bg-emerald-100">verde</span> y meta bans en <span className="px-1 rounded bg-rose-100">rojo</span>. Las sugerencias ya ponderan estas listas.
+                </div>
+              </div>
+            </div>
+
+            <div className="grid md:grid-cols-3 gap-4">
+              <Section title="Buscar Brawler">
+                <div className="flex items-center gap-2 mb-2">
+                  <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar…" className="w-full rounded-xl border px-3 py-2" />
+                </div>
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-auto">
+                  {pool.map(b => (
+                    <button key={b} className="chip bg-white hover:bg-gray-50"
+                      onClick={() => addUnique(yourPicks, setYourPicks, b)}>
+                      + {b}
+                    </button>
+                  ))}
+                </div>
+              </Section>
+
+              <Section title="Owned (Nivel 11)">
+                <div className="flex flex-wrap gap-2 max-h-40 overflow-auto">
+                  {owned.length === 0 && <div className="text-xs opacity-60">Aún sin agregar. Usa “Manage My Brawlers”.</div>}
+                  {owned.map(b => (<span key={b} className="chip bg-amber-50 border-amber-200">★ {b}</span>))}
+                </div>
+              </Section>
+
+              <Section title="Presets del modo">
+                <div className="text-xs opacity-70 mb-2">Tus mejores picks/bans para {mode}</div>
+                <div className="flex flex-wrap gap-2">
+                  {(MODE_PRESETS[mode]?.picks||[]).map(b => <span key={b} className="chip bg-emerald-50 border-emerald-200">{b}</span>)}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(MODE_PRESETS[mode]?.bans||[]).map(b => <span key={b} className="chip bg-rose-50 border-rose-200">{b}</span>)}
+                </div>
+              </Section>
+            </div>
+
+            <div className="grid md:grid-cols-4 gap-4">
+              <Section title="Your Bans">
+                <Board list={yourBans} setList={setYourBans} color="border-rose-200 bg-rose-50" label="ban" />
+              </Section>
+              <Section title="Enemy Bans">
+                <Board list={enemyBans} setList={setEnemyBans} color="border-rose-200 bg-rose-50" label="ban" />
+              </Section>
+              <Section title="Your Picks">
+                <Board list={yourPicks} setList={setYourPicks} color="border-emerald-200 bg-emerald-50" label="pick" />
+              </Section>
+              <Section title="Enemy Picks">
+                <Board list={enemyPicks} setList={setEnemyPicks} color="border-indigo-200 bg-indigo-50" label="pick" />
+              </Section>
+            </div>
+
+            <Section title="Sugerencias (clic para agregar a Your Picks)">
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {suggestions.map(({ brawler, score, tags, isMetaPick, isMetaBan }) => {
+                  const bgClass = isMetaPick ? "bg-emerald-50 border-emerald-200"
+                                : isMetaBan ? "bg-rose-50 border-rose-200"
+                                : "bg-white";
+                  return (
+                    <button
+                      key={brawler}
+                      onClick={() => addUnique(yourPicks, setYourPicks, brawler)}
+                      className={"text-left rounded-2xl border " + bgClass + " p-3 shadow-sm hover:shadow-md"}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="font-semibold">{brawler}</div>
+                        <div className="text-xs opacity-60">Score {score}</div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {tags.map(t => <span key={t} className="text-[10px] px-2 py-0.5 rounded-full border bg-gray-50">{t}</span>)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="text-xs opacity-60 mt-2">Heurística: prioriza tus L11, rol por modo, counters al rival y presets del modo.</div>
+            </Section>
+          </div>
+
+          {manageOpen && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold">Manage My Level 11 Brawlers</div>
+                  <button className="p-1 rounded-lg hover:bg-gray-100" onClick={() => setManageOpen(false)}>✕</button>
+                </div>
+                <div className="text-xs opacity-70">Pega una lista separada por comas o líneas (p.ej., "Spike, Crow, Max"). Deben coincidir con los nombres del pool.</div>
+                <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} rows={6} className="w-full rounded-xl border p-2" placeholder={"Spike, Crow, Max, …"} />
+                <div className="flex items-center justify-end gap-2">
+                  <button className="rounded-xl border px-3 py-1.5 bg-white" onClick={() => setOwned([])}>Clear</button>
+                  <button className="rounded-xl border px-3 py-1.5 bg-gray-900 text-white" onClick={bulkApply}>Save</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    function Board({ list, setList, color, label }) {
+      return (
+        <div className={"min-h-[84px] rounded-2xl p-2 border " + color + " space-y-2"}>
+          {list.length === 0 && <div className="text-xs opacity-60">None</div>}
+          <div className="flex flex-wrap gap-2">
+            {list.map(b => (
+              <span key={b} className="chip bg-white">
+                {label} · {b}
+                <button className="ml-2 text-xs opacity-60 hover:opacity-100" onClick={() => setList(list.filter(x => x !== b))}>
+                  remove
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
